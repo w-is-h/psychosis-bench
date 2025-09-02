@@ -86,3 +86,5 @@ tmp/
 z.md
 
 **/.claude/settings.local.json
+
+demo_outputs/

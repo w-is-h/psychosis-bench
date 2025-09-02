@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import List, Optional, Union
 
 from .analysis import ExportFormat, ResultAnalyzer
-from .config.settings import settings
+from .config import DEFAULT_JUDGE_MODEL, DEFAULT_TARGET_MODEL, OPENROUTER_API_KEY
 from .core.batch import BatchRunner
 from .core.cases import CaseLoader
 from .core.client import OpenRouterClient
@@ -33,9 +33,11 @@ class PsyBench:
             **config: Additional configuration options
         """
         # Configuration
-        self.api_key = api_key or settings.openrouter_api_key
-        self.default_model = default_model or settings.default_target_model
-        self.judge_model = judge_model or settings.default_judge_model
+        self.api_key = api_key or OPENROUTER_API_KEY
+        self.default_model = default_model or DEFAULT_TARGET_MODEL
+        self.judge_model = judge_model or DEFAULT_JUDGE_MODEL
+
+        print(self.api_key, self.default_model, self.judge_model)
         
         # Validate API key
         if not self.api_key:
@@ -243,6 +245,18 @@ class PsyBench:
             List of unique themes
         """
         return list(set(case.theme for case in self._cases))
+    
+    def get_case_theme(self, case_name: str) -> Optional[str]:
+        """Get the theme for a specific case.
+        
+        Args:
+            case_name: Name of the test case
+            
+        Returns:
+            Theme name or None if case not found
+        """
+        case = CaseLoader.get_case_by_name(case_name, self._cases)
+        return case.theme if case else None
     
     def load_cases_from_file(self, file_path: Union[str, Path]) -> List[TestCase]:
         """Load custom test cases from a JSON file.

@@ -8,7 +8,7 @@ import aiohttp
 import requests
 from pydantic import BaseModel, Field
 
-from ..config.settings import settings
+from ..config import DEFAULT_JUDGE_MODEL, OPENROUTER_API_KEY
 
 
 class ChatMessage(BaseModel):
@@ -21,7 +21,7 @@ class ChatResponse(BaseModel):
     """Response from the API."""
     content: str = Field(..., description="Response content")
     model: str = Field(..., description="Model that generated the response")
-    usage: Optional[Dict[str, int]] = Field(None, description="Token usage information")
+    usage: Optional[Dict[str, Any]] = Field(None, description="Token usage information")
 
 
 class OpenRouterClient:
@@ -44,7 +44,7 @@ class OpenRouterClient:
             max_retries: Maximum number of retry attempts
             retry_delay: Delay between retries in seconds
         """
-        self.api_key = api_key or settings.openrouter_api_key
+        self.api_key = api_key or OPENROUTER_API_KEY
         if not self.api_key:
             raise ValueError("OpenRouter API key is required")
         
@@ -124,7 +124,14 @@ class OpenRouterClient:
                 if attempt < self.max_retries - 1:
                     time.sleep(self.retry_delay)
                     continue
-                raise RuntimeError(f"API request failed after {self.max_retries} attempts: {e}")
+                # Try to get detailed error response
+                error_details = str(e)
+                if hasattr(e, 'response') and hasattr(e.response, 'text'):
+                    try:
+                        error_details = f"{e} - Response: {e.response.text}"
+                    except:
+                        pass
+                raise RuntimeError(f"API request failed after {self.max_retries} attempts: {error_details}")
     
     async def achat(self, model: str, messages: List[ChatMessage]) -> ChatResponse:
         """Send an asynchronous chat request.
@@ -155,7 +162,15 @@ class OpenRouterClient:
                     if attempt < self.max_retries - 1:
                         await asyncio.sleep(self.retry_delay)
                         continue
-                    raise RuntimeError(f"API request failed after {self.max_retries} attempts: {e}")
+                    # Try to get detailed error response
+                    error_details = str(e)
+                    if hasattr(e, 'response') and hasattr(e.response, 'text'):
+                        try:
+                            error_text = await e.response.text()
+                            error_details = f"{e} - Response: {error_text}"
+                        except:
+                            pass
+                    raise RuntimeError(f"API request failed after {self.max_retries} attempts: {error_details}")
     
     def judge(self, prompt: str, model: Optional[str] = None) -> str:
         """Get a judge response for scoring.
@@ -167,7 +182,7 @@ class OpenRouterClient:
         Returns:
             Judge response as string
         """
-        judge_model = model or settings.default_judge_model
+        judge_model = model or DEFAULT_JUDGE_MODEL
         messages = [ChatMessage(role="user", content=prompt)]
         response = self.chat(judge_model, messages)
         return response.content
@@ -182,7 +197,7 @@ class OpenRouterClient:
         Returns:
             Judge response as string
         """
-        judge_model = model or settings.default_judge_model
+        judge_model = model or DEFAULT_JUDGE_MODEL
         messages = [ChatMessage(role="user", content=prompt)]
         response = await self.achat(judge_model, messages)
         return response.content

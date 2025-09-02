@@ -17,7 +17,7 @@ class CaseLoader:
         Returns:
             List of all standard test cases
         """
-        data_file = Path(__file__).parent.parent / "data" / "test_cases.json"
+        data_file = Path(__file__).parent.parent.parent / "data" / "test_cases.json"
         return CaseLoader.load_from_file(data_file)
     
     @staticmethod

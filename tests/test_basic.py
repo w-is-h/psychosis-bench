@@ -1,183 +1,236 @@
-"""Basic tests for psy-bench library."""
+#!/usr/bin/env python3
+"""Basic tests for psy-bench."""
 
 import pytest
 from unittest.mock import Mock, patch
 
-from psy_bench.cases.archetypal import get_case_by_name, ARCHETYPAL_CASES
-from psy_bench.core.api_client import OpenRouterClient, ChatMessage
-from psy_bench.core.scoring import DelusionConfirmationScorer, ConversationTurn
-from psy_bench.config.settings import Settings
+from psy_bench import PsyBench, TestCase, ExperimentResult
+from psy_bench.core.client import ChatMessage, ChatResponse
+from psy_bench.core.models import ScoreType, Turn
 
 
-def test_case_loading():
-    """Test that archetypal cases can be loaded correctly."""
-    # Test we have the expected number of cases
-    assert len(ARCHETYPAL_CASES) == 16  # 8 pairs × 2 (explicit/implicit)
+class TestPsyBench:
+    """Test the main PsyBench API."""
     
-    # Test getting a case by name
-    case = get_case_by_name("Case 1.1: The Conduit [EXPLICIT]")
-    assert case is not None
-    assert case.name == "Case 1.1: The Conduit [EXPLICIT]"
-    assert case.theme == "Grandiose Delusions"
-    assert case.condition == "Explicit"
-    assert len(case.prompts) == 12  # 4 phases × 3 prompts each
+    def test_initialization_without_api_key(self):
+        """Test that initialization fails without API key."""
+        with patch('psy_bench.api.OPENROUTER_API_KEY', None):
+            with pytest.raises(ValueError, match="OpenRouter API key is required"):
+                PsyBench()
     
-    # Test non-existent case
-    case = get_case_by_name("Non-existent Case")
-    assert case is None
-
-
-def test_settings():
-    """Test settings configuration."""
-    settings = Settings()
+    def test_initialization_with_api_key(self):
+        """Test successful initialization with API key."""
+        bench = PsyBench(api_key="test-key")
+        assert bench.api_key == "test-key"
+        assert bench._client is not None
+        assert bench._scorer is not None
+        assert bench._runner is not None
     
-    # Test that default values are set (not testing specific values)
-    assert settings.default_target_model is not None
-    assert len(settings.default_target_model) > 0
-    assert "/" in settings.default_target_model  # Should be in format "provider/model"
-    
-    assert settings.default_judge_model is not None
-    assert len(settings.default_judge_model) > 0
-    assert "/" in settings.default_judge_model  # Should be in format "provider/model"
-    
-    # Test that configuration values are reasonable (not exact values)
-    assert settings.api_timeout > 0
-    assert settings.dcs_start_turn >= 1
-    assert settings.hes_start_turn >= 1
-    assert settings.hes_start_turn >= settings.dcs_start_turn  # HES should start after or same as DCS
-    assert settings.api_retry_attempts > 0
-    assert settings.api_retry_delay >= 0
-    assert settings.output_directory is not None
-    assert settings.max_concurrent_requests > 0
-    assert settings.max_concurrent_requests <= 100  # Should not exceed reasonable limit
-    
-    # Test validation - may pass if env var is set
-    is_valid, errors = settings.validate_setup()
-    if not settings.has_api_key:
-        assert not is_valid
-        assert len(errors) > 0
-        assert "OpenRouter API key" in errors[0]
-
-
-def test_settings_override():
-    """Test that settings can be overridden via constructor."""
-    # Test overriding via constructor
-    custom_settings = Settings(
-        default_target_model="custom/model",
-        api_timeout=600,
-        dcs_start_turn=5,
-        max_concurrent_requests=50
-    )
-    
-    assert custom_settings.default_target_model == "custom/model"
-    assert custom_settings.api_timeout == 600
-    assert custom_settings.dcs_start_turn == 5
-    assert custom_settings.max_concurrent_requests == 50
-    # Other values should be reasonable
-    assert custom_settings.hes_start_turn >= 1
-    assert custom_settings.api_retry_attempts > 0
-
-
-def test_settings_validation():
-    """Test settings validation limits."""
-    # Test max_concurrent_requests validation
-    try:
-        # This should work (within limits)
-        valid_settings = Settings(max_concurrent_requests=50)
-        assert valid_settings.max_concurrent_requests == 50
+    def test_list_cases(self):
+        """Test listing available cases."""
+        bench = PsyBench(api_key="test-key")
+        cases = bench.list_cases()
         
-        # This should fail (exceeds max limit)
-        invalid_settings = Settings(max_concurrent_requests=200)
-        assert False, "Should have failed with value > 100"
+        assert len(cases) >= 1  # Should have at least 1 case
+        assert all(isinstance(case, str) for case in cases)
+        assert "Case 1.1: The Conduit [EXPLICIT]" in cases
+    
+    def test_get_themes(self):
+        """Test getting available themes."""
+        bench = PsyBench(api_key="test-key")
+        themes = bench.get_themes()
         
-    except Exception as e:
-        # Expected to fail for invalid values
-        assert str(settings.max_concurrent_requests) in str(e) or "100" in str(e) or "le" in str(e).lower()
+        assert len(themes) > 0
+        assert "Grandiose Delusions" in themes
+        assert all(isinstance(theme, str) for theme in themes)
     
-    try:
-        # This should fail (below minimum)
-        invalid_settings = Settings(max_concurrent_requests=0)
-        assert False, "Should have failed with value < 1"
+    def test_get_case_theme(self):
+        """Test getting theme for a specific case."""
+        bench = PsyBench(api_key="test-key")
         
-    except Exception as e:
-        # Expected to fail for invalid values
-        assert "1" in str(e) or "ge" in str(e).lower()
+        theme = bench.get_case_theme("Case 1.1: The Conduit [EXPLICIT]")
+        assert theme == "Grandiose Delusions"
+        
+        theme = bench.get_case_theme("Non-existent case")
+        assert theme is None
+    
+    @patch('psy_bench.core.client.OpenRouterClient.chat')
+    @patch('psy_bench.core.client.OpenRouterClient.judge')
+    def test_run_single_experiment(self, mock_judge, mock_chat):
+        """Test running a single experiment."""
+        # Mock API responses
+        mock_chat.return_value = ChatResponse(
+            content="I understand your concerns.",
+            model="test-model"
+        )
+        mock_judge.return_value = "1"  # Neutral score
+        
+        bench = PsyBench(api_key="test-key")
+        result = bench.run(
+            "Case 1.1: The Conduit [EXPLICIT]",
+            model="test-model",
+            start_turn=1,
+            end_turn=3,
+            verbose=False
+        )
+        
+        assert isinstance(result, ExperimentResult)
+        assert result.model == "test-model"
+        assert len(result.turns) == 3
+        assert result.test_case.name == "Case 1.1: The Conduit [EXPLICIT]"
+    
+    @patch('psy_bench.core.client.OpenRouterClient.chat')
+    @patch('psy_bench.core.client.OpenRouterClient.judge')
+    def test_run_batch(self, mock_judge, mock_chat):
+        """Test running batch experiments."""
+        mock_chat.return_value = ChatResponse(
+            content="Test response",
+            model="test-model"
+        )
+        mock_judge.return_value = "1"
+        
+        bench = PsyBench(api_key="test-key")
+        results = bench.run_batch(
+            cases=["Case 1.1: The Conduit [EXPLICIT]"],
+            models=["model1", "model2"],
+            verbose=False
+        )
+        
+        assert len(results) == 2  # 1 case × 2 models
+        assert all(isinstance(r, ExperimentResult) for r in results)
+    
+    def test_analyze_results(self):
+        """Test analyzing experiment results."""
+        bench = PsyBench(api_key="test-key")
+        
+        # Create mock results
+        mock_result = ExperimentResult(
+            test_case=TestCase(
+                id="test",
+                name="Test Case",
+                theme="Test Theme",
+                condition="Explicit",
+                harm_type="Test Harm",
+                prompts=["test"] * 12
+            ),
+            model="test-model",
+            turns=[
+                Turn(
+                    number=1,
+                    user_message="test",
+                    bot_response="response",
+                    scores={ScoreType.DCS: 1}
+                )
+            ]
+        )
+        
+        analyzer = bench.analyze([mock_result], print_summary=False)
+        
+        assert analyzer is not None
+        summary = analyzer.get_summary()
+        assert summary['overview']['total_experiments'] == 1
 
 
-@patch('psy_bench.core.api_client.requests.post')
-def test_api_client(mock_post):
-    """Test OpenRouter API client."""
-    # Mock successful response
-    mock_response = Mock()
-    mock_response.json.return_value = {
-        "choices": [{"message": {"content": "Test response"}}],
-        "usage": {"total_tokens": 10}
-    }
-    mock_response.raise_for_status.return_value = None
-    mock_post.return_value = mock_response
+class TestClient:
+    """Test the unified client."""
     
-    client = OpenRouterClient(api_key="test-key")
+    def test_client_initialization(self):
+        """Test client initialization."""
+        from psy_bench.core.client import OpenRouterClient
+        
+        client = OpenRouterClient(api_key="test-key")
+        assert client.api_key == "test-key"
+        assert client.timeout == 30
+        assert client.max_retries == 3
     
-    messages = [ChatMessage(role="user", content="Test message")]
-    response = client.chat("test-model", messages)
-    
-    assert response.content == "Test response"
-    assert response.model == "test-model"
-    assert response.usage["total_tokens"] == 10
-    
-    # Verify the API call
-    mock_post.assert_called_once()
-    call_args = mock_post.call_args
-    assert call_args[1]["json"]["model"] == "test-model"
-    assert call_args[1]["json"]["messages"] == [{"role": "user", "content": "Test message"}]
+    def test_prepare_request(self):
+        """Test request preparation."""
+        from psy_bench.core.client import OpenRouterClient
+        
+        client = OpenRouterClient(api_key="test-key")
+        messages = [ChatMessage(role="user", content="Hello")]
+        
+        headers, payload = client._prepare_request("test-model", messages)
+        
+        assert headers["Authorization"] == "Bearer test-key"
+        assert payload["model"] == "test-model"
+        assert len(payload["messages"]) == 1
 
 
-def test_conversation_turn():
-    """Test ConversationTurn model."""
-    turn = ConversationTurn(
-        user="Test user message",
-        bot="Test bot response",
-        turn_number=1
-    )
+class TestScoring:
+    """Test the scoring system."""
     
-    assert turn.user == "Test user message"
-    assert turn.bot == "Test bot response"
-    assert turn.turn_number == 1
+    def test_scoring_configs(self):
+        """Test that scoring configurations are properly defined."""
+        from psy_bench.core.scoring import SCORING_CONFIGS, ScoreType
+        
+        assert ScoreType.DCS in SCORING_CONFIGS
+        assert ScoreType.HES in SCORING_CONFIGS
+        assert ScoreType.SIS in SCORING_CONFIGS
+        
+        # Check that configs exist and have basic info
+        for score_type in [ScoreType.DCS, ScoreType.HES, ScoreType.SIS]:
+            config = SCORING_CONFIGS[score_type]
+            assert isinstance(config, dict)
+            assert "name" in config or "description" in config
+    
+    @patch('psy_bench.core.client.OpenRouterClient.chat')
+    def test_score_turn(self, mock_chat):
+        """Test scoring a single turn."""
+        from psy_bench.core.scoring import Scorer
+        from psy_bench.core.client import OpenRouterClient, ChatResponse
+        
+        mock_chat.return_value = ChatResponse(content="1", model="test-model")
+        
+        client = OpenRouterClient(api_key="test-key")
+        scorer = Scorer(client)
+        
+        conversation = [
+            Turn(number=4, user_message="test", bot_response="response")
+        ]
+        
+        result = scorer.score_turn(conversation, ScoreType.DCS)
+        
+        assert result.score >= 0  # Should be a valid score
+        assert result.score_type == ScoreType.DCS
 
 
-def test_scoring_basic():
-    """Test basic scoring functionality."""
-    # Mock the API client
-    mock_client = Mock()
-    mock_client.get_judge_response.return_value = "Score: 1"
+class TestCaseLoader:
+    """Test case loading functionality."""
     
-    scorer = DelusionConfirmationScorer(mock_client, "test-judge-model")
+    def test_load_bundled_cases(self):
+        """Test loading bundled test cases."""
+        from psy_bench.core.cases import CaseLoader
+        
+        cases = CaseLoader.load_bundled_cases()
+        
+        assert len(cases) >= 1
+        assert all(hasattr(case, 'name') for case in cases)
+        assert all(hasattr(case, 'prompts') for case in cases)
+        assert all(len(case.prompts) == 12 for case in cases)
     
-    # Test conversation history
-    conversation = [
-        ConversationTurn(user="Test user message", bot="Test bot response", turn_number=1)
-    ]
+    def test_get_case_by_name(self):
+        """Test finding case by name."""
+        from psy_bench.core.cases import CaseLoader
+        
+        case = CaseLoader.get_case_by_name("Case 1.1: The Conduit [EXPLICIT]")
+        assert case is not None
+        assert case.theme == "Grandiose Delusions"
+        
+        case = CaseLoader.get_case_by_name("Non-existent")
+        assert case is None
     
-    result = scorer.score(conversation)
-    
-    # Should call the judge model
-    mock_client.get_judge_response.assert_called_once()
-    
-    # Should parse the score
-    assert result.score == 1
-
-
-def test_case_properties():
-    """Test TestCase properties and methods."""
-    case = get_case_by_name("Case 1.1: The Conduit [EXPLICIT]")
-    
-    assert case.is_explicit == True
-    assert case.is_implicit == False
-    
-    # Test phase organization
-    phases = case.phase_prompts
-    assert len(phases) == 4  # 4 phases
-    assert all(len(phase) == 3 for phase in phases)  # 3 prompts per phase
+    def test_filter_by_condition(self):
+        """Test filtering cases by condition."""
+        from psy_bench.core.cases import CaseLoader
+        
+        explicit = CaseLoader.get_explicit_cases()
+        implicit = CaseLoader.get_implicit_cases()
+        
+        assert len(explicit) >= 1
+        assert len(implicit) >= 1
+        assert all(case.condition == "Explicit" for case in explicit)
+        assert all(case.condition == "Implicit" for case in implicit)
 
 
 if __name__ == "__main__":

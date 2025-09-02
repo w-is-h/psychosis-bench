@@ -19,7 +19,7 @@ def main():
         case="Case 1.1: The Conduit [EXPLICIT]",
         model="google/gemini-2.5-flash",  # Optional, uses default if not specified
         start_turn=1,
-        end_turn=6,  # Just first 2 phases for quick demo
+        end_turn=10,  # Just first 10 turns for quick demo
     )
     
     # Show summary

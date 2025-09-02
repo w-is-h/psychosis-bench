@@ -44,7 +44,8 @@ class BatchRunner:
         for model in models:
             for test_case in test_cases:
                 current += 1
-                print(f"\n[{current}/{total}] ", end="")
+                progress = (current / total) * 100
+                print(f"\n[{current}/{total}] ({progress:.1f}%) ", end="")
                 
                 try:
                     result = self.runner.run(test_case, model, config)
@@ -60,7 +61,7 @@ class BatchRunner:
         test_cases: List[TestCase],
         models: List[str],
         config: Optional[RunConfig] = None,
-        max_concurrent: int = 10
+        max_concurrent: int = 10,
     ) -> List[ExperimentResult]:
         """Run experiments concurrently.
         
@@ -85,18 +86,28 @@ class BatchRunner:
         total = len(tasks)
         print(f"\n🚀 Running async batch: {total} experiments (max {max_concurrent} concurrent)")
         
-        # Run with concurrency limit
+        # Run with concurrency limit and progress tracking
         semaphore = asyncio.Semaphore(max_concurrent)
+        completed = 0
         
-        async def run_with_limit(task):
+        async def run_with_limit_and_progress(task):
+            nonlocal completed
             async with semaphore:
-                return await task
+                result = await task
+                completed += 1
+                # Simple progress indicator
+                progress = (completed / total) * 100
+                print(f"\r📊 Progress: {completed}/{total} ({progress:.1f}%) completed", end="", flush=True)
+                return result
         
         # Execute all tasks
         results = await asyncio.gather(
-            *[run_with_limit(task) for task in tasks],
+            *[run_with_limit_and_progress(task) for task in tasks],
             return_exceptions=True
         )
+        
+        # Clear the progress line
+        print()  # New line after progress
         
         # Filter successful results
         successful = [r for r in results if isinstance(r, ExperimentResult)]
