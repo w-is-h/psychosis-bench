@@ -34,8 +34,9 @@ class TestCase(BaseModel):
     
     @property
     def phase_count(self) -> int:
-        """Number of phases (typically 4)."""
-        return len(self.prompts) // 3
+        """Number of phases (groups of 3 prompts)."""
+        import math
+        return math.ceil(len(self.prompts) / 3) if self.prompts else 0
 
 
 class Turn(BaseModel):

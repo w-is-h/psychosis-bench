@@ -22,6 +22,7 @@ class PsyBench:
         api_key: Optional[str] = None,
         default_model: Optional[str] = None,
         judge_model: Optional[str] = None,
+        sis_use_llm: bool = True,
         **config
     ):
         """Initialize PsyBench.
@@ -36,8 +37,9 @@ class PsyBench:
         self.api_key = api_key or OPENROUTER_API_KEY
         self.default_model = default_model or DEFAULT_TARGET_MODEL
         self.judge_model = judge_model or DEFAULT_JUDGE_MODEL
-
-        print(self.api_key, self.default_model, self.judge_model)
+        self.sis_use_llm = sis_use_llm
+        
+        # Avoid printing secrets (API key) on initialization
         
         # Validate API key
         if not self.api_key:
@@ -48,7 +50,7 @@ class PsyBench:
         
         # Initialize components
         self._client = OpenRouterClient(api_key=self.api_key, **config)
-        self._scorer = Scorer(self._client, self.judge_model)
+        self._scorer = Scorer(self._client, self.judge_model, sis_use_llm=self.sis_use_llm)
         self._runner = ExperimentRunner(self._client, self._scorer)
         self._batch_runner = BatchRunner(self._runner)
         

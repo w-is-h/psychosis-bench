@@ -4,9 +4,12 @@
 import asyncio
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
+import colorsys
 
 from psy_bench import PsyBench, ExportFormat
 
@@ -24,7 +27,7 @@ async def async_batch_example():
     # Test multiple models concurrently
     models = [
         "google/gemini-2.5-flash",
-        "openai/gpt-5",
+#        "openai/gpt-5",
         "anthropic/claude-sonnet-4"
     ]
 
@@ -36,7 +39,7 @@ async def async_batch_example():
     
     # Run with high concurrency
     results = await bench.run_batch_async(
-        cases=explicit_cases,
+        cases=explicit_cases[:2],
         models=models,
         max_concurrent=20,
         verbose=False
@@ -111,6 +114,133 @@ def custom_cases_example():
     custom_cases_path.unlink()
     
     return result
+
+
+def create_styled_table_html(df):
+    """Create a styled HTML table with background gradients without requiring jinja2."""
+    
+    # Get numeric columns (exclude the first column which is usually the index)
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    
+    # Calculate min and max for each numeric column (fallbacks for unknown metrics)
+    col_mins = df[numeric_cols].min()
+    col_maxs = df[numeric_cols].max()
+
+    def determine_metric_kind(col_name: str, row) -> str | None:
+        # Prefer row-wise score_type if present (e.g., 'avg_dcs', 'avg_hes', 'total_sis')
+        if 'score_type' in df.columns:
+            try:
+                st = str(row['score_type']).lower()
+                if 'dcs' in st:
+                    return 'dcs'
+                if 'hes' in st:
+                    return 'hes'
+                if 'sis' in st:
+                    return 'sis'
+            except Exception:
+                pass
+        # Otherwise infer from column name (used in case-performance table)
+        name = str(col_name).lower()
+        if 'dcs' in name:
+            return 'dcs'
+        if 'hes' in name:
+            return 'hes'
+        if 'sis' in name:
+            return 'sis'
+        return None
+
+    def to_rgb_css_from_normalized(norm: float, invert: bool) -> tuple[str, str]:
+        # Clamp
+        norm = 0.0 if np.isnan(norm) else max(0.0, min(1.0, float(norm)))
+        # Hue: green (120°) to red (0°)
+        hue_deg = (120.0 * norm) if invert else (120.0 * (1.0 - norm))
+        h = hue_deg / 360.0
+        l = 0.5
+        s = 0.7
+        r, g, b = colorsys.hls_to_rgb(h, l, s)
+        R, G, B = int(r * 255), int(g * 255), int(b * 255)
+        bg = f'rgb({R}, {G}, {B})'
+        # Perceived brightness threshold for text color
+        text = 'white' if (R * 0.299 + G * 0.587 + B * 0.114) < 160 else 'black'
+        return bg, text
+    
+    # Create HTML table
+    html = ['<table>']
+    
+    # Add header row
+    html.append('<thead><tr>')
+    for col in df.columns:
+        html.append(f'<th>{col}</th>')
+    html.append('</tr></thead>')
+    
+    # Add data rows
+    html.append('<tbody>')
+    for _, row in df.iterrows():
+        html.append('<tr>')
+        # Precompute row-level SIS normalization reference if needed
+        row_metric_kind = None
+        if 'score_type' in df.columns:
+            try:
+                st = str(row['score_type']).lower()
+                if 'sis' in st:
+                    row_metric_kind = 'sis'
+            except Exception:
+                row_metric_kind = None
+        sis_row_ref = None
+        if row_metric_kind == 'sis':
+            # Use row-wise robust reference for SIS if total_turns not available
+            sis_values = []
+            for c, v in row.items():
+                if c in numeric_cols and ('mean' in str(c).lower() or 'sis' in str(c).lower()):
+                    try:
+                        sis_values.append(float(v))
+                    except Exception:
+                        pass
+            if sis_values:
+                sis_row_ref = max(np.percentile(sis_values, 95), max(sis_values))
+
+        for i, (col, value) in enumerate(row.items()):
+            if col in numeric_cols:
+                metric_kind = determine_metric_kind(col, row)
+                # In pivoted statistics table, color only 'mean' columns
+                if 'score_type' in df.columns and ('mean' not in str(col).lower()):
+                    html.append(f'<td>{value:.6f}</td>')
+                    continue
+
+                if metric_kind == 'dcs' or metric_kind == 'hes':
+                    normalized = float(value) / 5.0 if value is not None else 0.5
+                    bg_color, text_color = to_rgb_css_from_normalized(normalized, invert=False)
+                    html.append(f'<td style="background-color: {bg_color}; color: {text_color};">{value:.6f}</td>')
+                elif metric_kind == 'sis':
+                    # Prefer absolute normalization if total_turns available
+                    denom = None
+                    if 'total_turns' in df.columns:
+                        try:
+                            denom = 5.0 * float(row['total_turns'])
+                        except Exception:
+                            denom = None
+                    if denom is None:
+                        # Fallback to row-wise robust reference if available; else column max-min
+                        if sis_row_ref and sis_row_ref > 0:
+                            denom = sis_row_ref
+                        else:
+                            rng = (col_maxs[col] - col_mins[col])
+                            denom = float(col_maxs[col]) if rng == 0 else float(col_maxs[col])
+                            if denom <= 0:
+                                denom = 1.0
+                    normalized = float(value) / denom if denom else 0.5
+                    bg_color, text_color = to_rgb_css_from_normalized(normalized, invert=True)
+                    html.append(f'<td style="background-color: {bg_color}; color: {text_color};">{value:.6f}</td>')
+                else:
+                    # Unrecognized metric; leave uncolored to avoid misleading cues
+                    html.append(f'<td>{value:.6f}</td>')
+            else:
+                html.append(f'<td>{value}</td>')
+        html.append('</tr>')
+    html.append('</tbody>')
+    
+    html.append('</table>')
+    return '\n'.join(html)
 
 
 def create_visualizations(analyzer, output_dir):
@@ -241,8 +371,6 @@ def create_visualizations(analyzer, output_dir):
         )
         fig_dist.update_xaxes(title_text="DCS Score", row=1, col=1)
         fig_dist.update_xaxes(title_text="HES Score", row=1, col=2)
-        fig_dist.update_yaxes(title_text="Count", row=1, col=1)
-        fig_dist.update_yaxes(title_text="Count", row=1, col=2)
         
         dist_viz_path = output_dir / 'score_distributions.html'
         fig_dist.write_html(str(dist_viz_path))
@@ -267,6 +395,132 @@ def create_visualizations(analyzer, output_dir):
         safety_viz_path = output_dir / 'safety_landscape.html'
         fig_safety.write_html(str(safety_viz_path))
         print(f"   🛡️  Safety landscape: {safety_viz_path}")
+    
+    # 5. Styled Statistics Table
+    if len(df) > 0:
+        # Create a pivoted table with statistics for each model and score type
+        # First, melt the dataframe to have score types as rows
+        score_columns = ['avg_dcs', 'avg_hes', 'total_sis']
+        melted_df = df.melt(
+            id_vars=['model'], 
+            value_vars=score_columns,
+            var_name='score_type', 
+            value_name='score_value'
+        )
+        
+        # Create pivot table with statistics
+        pivoted_df = melted_df.groupby(['model', 'score_type'])['score_value'].agg([
+            'count', 'mean', 'std', 'min'
+        ]).round(6)
+        
+        # Flatten the multi-level columns
+        pivoted_df.columns = [f'{col}' for col in pivoted_df.columns]
+        pivoted_df = pivoted_df.reset_index()
+        
+        # Pivot again to get models as columns and score types as rows
+        final_pivot = pivoted_df.pivot_table(
+            index='score_type',
+            columns='model',
+            values=['count', 'mean', 'std', 'min'],
+            fill_value=0
+        )
+        
+        # Flatten column names
+        final_pivot.columns = [f'{col[1]}_{col[0]}' for col in final_pivot.columns]
+        final_pivot = final_pivot.reset_index()
+        
+        # Create styled table HTML without requiring jinja2
+        styled_table_html = create_styled_table_html(final_pivot)
+        
+        # Save styled table to HTML file
+        table_viz_path = output_dir / 'styled_statistics_table.html'
+        with open(table_viz_path, 'w') as f:
+            f.write(f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Model Statistics Table</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; margin: 20px; }}
+        h1 {{ color: #333; }}
+        table {{ border-collapse: collapse; width: 100%; }}
+        th, td {{ border: 1px solid #ddd; padding: 8px; text-align: center; }}
+        th {{ background-color: #f2f2f2; }}
+    </style>
+</head>
+<body>
+    <h1>Model Performance Statistics</h1>
+    <p>This table shows count, mean, standard deviation, and minimum values for each model and score type.</p>
+    {styled_table_html}
+</body>
+</html>
+            """)
+        
+        print(f"   📋 Styled statistics table: {table_viz_path}")
+    
+    # 6. Per-Case Performance Table
+    if len(df) > 0:
+        # Create a table showing each case with all models and their scores
+        case_performance_data = []
+        
+        # Get unique cases and models
+        unique_cases = df['case'].unique()
+        unique_models = df['model'].unique()
+        
+        for case in unique_cases:
+            case_data = {'Case': case}
+            case_df = df[df['case'] == case]
+            
+            for model in unique_models:
+                model_data = case_df[case_df['model'] == model]
+                if len(model_data) > 0:
+                    # Add DCS, HES, SIS for this model
+                    case_data[f'{model}_DCS'] = model_data['avg_dcs'].iloc[0]
+                    case_data[f'{model}_HES'] = model_data['avg_hes'].iloc[0]
+                    case_data[f'{model}_SIS'] = model_data['total_sis'].iloc[0]
+                else:
+                    # Fill with 0 if no data
+                    case_data[f'{model}_DCS'] = 0
+                    case_data[f'{model}_HES'] = 0
+                    case_data[f'{model}_SIS'] = 0
+            
+            case_performance_data.append(case_data)
+        
+        # Create DataFrame
+        case_performance_df = pd.DataFrame(case_performance_data)
+        
+        # Create styled table HTML
+        case_styled_table_html = create_styled_table_html(case_performance_df)
+        
+        # Save case performance table to HTML file
+        case_table_viz_path = output_dir / 'case_performance_table.html'
+        with open(case_table_viz_path, 'w') as f:
+            f.write(f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Case Performance Table</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; margin: 20px; }}
+        h1 {{ color: #333; }}
+        table {{ border-collapse: collapse; width: 100%; font-size: 12px; }}
+        th, td {{ border: 1px solid #ddd; padding: 4px; text-align: center; }}
+        th {{ background-color: #f2f2f2; font-weight: bold; }}
+        .case-name {{ text-align: left; font-weight: bold; }}
+        .model-header {{ background-color: #e6f3ff; }}
+    </style>
+</head>
+<body>
+    <h1>Case Performance Across Models</h1>
+    <p>This table shows DCS, HES, and SIS scores for each test case across all models.</p>
+    <p><strong>Legend:</strong> DCS = Delusion Confirmation Score, HES = Harm Enablement Score, SIS = Safety Intervention Score</p>
+    <p><strong>Color coding:</strong> DCS/HES: Green → Yellow → Orange → Red (0–5 scale, lower is better) | SIS: Green → Yellow → Orange → Red (0–5 per turn, summed across turns)</p>
+    {case_styled_table_html}
+</body>
+</html>
+            """)
+        
+        print(f"   📊 Case performance table: {case_table_viz_path}")
     
     return len([f for f in output_dir.glob('*.html')])
 

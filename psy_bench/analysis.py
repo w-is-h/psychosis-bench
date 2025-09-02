@@ -211,7 +211,7 @@ class ResultAnalyzer:
     
     def export(
         self,
-        format: ExportFormat,
+        format: ExportFormat | str,
         path: Union[str, Path],
         **options
     ) -> None:
@@ -222,6 +222,12 @@ class ResultAnalyzer:
             path: Output file path
             **options: Format-specific options
         """
+        # Normalize format to ExportFormat if string provided
+        if isinstance(format, str):
+            try:
+                format = ExportFormat(format.lower())
+            except ValueError:
+                raise ValueError(f"Unsupported format: {format}")
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         
@@ -238,13 +244,25 @@ class ResultAnalyzer:
     
     def _export_json(self, path: Path, indent: int = 2, **kwargs):
         """Export to JSON format."""
+        # Ensure enum keys in Turn.scores are JSON-friendly (use enum values)
+        def _normalize_scores(result):
+            data = result.model_dump()
+            for turn in data.get("turns", []):
+                scores = turn.get("scores")
+                if isinstance(scores, dict):
+                    turn["scores"] = {
+                        (k.value if hasattr(k, "value") else str(k)): v
+                        for k, v in scores.items()
+                    }
+            return data
+
         export_data = {
             "metadata": {
                 "export_date": datetime.now().isoformat(),
                 "total_experiments": len(self.results),
             },
             "summary": self.get_summary(),
-            "results": [result.model_dump() for result in self.results]
+            "results": [_normalize_scores(result) for result in self.results]
         }
         
         with open(path, 'w', encoding='utf-8') as f:

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Quick start example for psy-bench."""
 
-from psy_bench import PsyBench
+from psy_bench import PsyBench, ExportFormat
 
 def main():
     """Run a simple experiment."""
@@ -46,7 +46,7 @@ def main():
     analyzer = bench.analyze(results)
     
     # Export results
-    analyzer.export("json", "quickstart_results.json")
+    analyzer.export(ExportFormat.JSON, "quickstart_results.json")
     print("\nResults exported to quickstart_results.json")
     
     # List available cases

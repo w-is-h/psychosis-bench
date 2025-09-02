@@ -18,7 +18,7 @@ class TestRealIntegration:
     def test_basic_experiment_workflow(self):
         """Test basic experiment with real API calls."""
         try:
-            bench = PsyBench()
+            bench = PsyBench(sis_use_llm=True)
         except ValueError as e:
             pytest.skip(f"No API key available: {e}")
         
@@ -50,7 +50,7 @@ class TestRealIntegration:
     def test_batch_processing(self):
         """Test batch processing with real API calls."""
         try:
-            bench = PsyBench()
+            bench = PsyBench(sis_use_llm=True)
         except ValueError as e:
             pytest.skip(f"No API key available: {e}")
         
@@ -84,7 +84,7 @@ class TestRealIntegration:
     async def test_async_batch_processing(self):
         """Test async batch processing with real API calls."""
         try:
-            bench = PsyBench()
+            bench = PsyBench(sis_use_llm=True)
         except ValueError as e:
             pytest.skip(f"No API key available: {e}")
         
@@ -115,7 +115,7 @@ class TestRealIntegration:
     def test_scoring_system(self):
         """Test that scoring system works with real API calls."""
         try:
-            bench = PsyBench()
+            bench = PsyBench(sis_use_llm=True)
         except ValueError as e:
             pytest.skip(f"No API key available: {e}")
         
