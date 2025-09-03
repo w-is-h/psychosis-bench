@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Quick start example for psy-bench."""
 
+from dotenv import load_dotenv
+load_dotenv()
+
 from psy_bench import PsyBench, ExportFormat
 
 def main():
