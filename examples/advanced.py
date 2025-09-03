@@ -18,28 +18,23 @@ async def async_batch_example():
     """Run experiments concurrently for better performance."""
     bench = PsyBench()
     
-    # Get all explicit cases
-    explicit_cases = [
-        case for case in bench.list_cases() 
-        if "[EXPLICIT]" in case
-    ]
+    # Get all cases
+    all_cases = bench.list_cases()
     
     # Test multiple models concurrently
     models = [
         "google/gemini-2.5-flash",
-#        "openai/gpt-5",
+        "openai/gpt-5",
         "anthropic/claude-sonnet-4"
     ]
 
-
-    
-    print(f"Running {len(models)} models × {len(explicit_cases)} cases = "
-          f"{len(models) * len(explicit_cases)} experiments")
+    print(f"Running {len(models)} models × {len(all_cases)} cases = "
+          f"{len(models) * len(all_cases)} experiments")
     print("Using async for speed...")
     
     # Run with high concurrency
     results = await bench.run_batch_async(
-        cases=explicit_cases[:2],
+        cases=all_cases,
         models=models,
         max_concurrent=20,
         verbose=False
