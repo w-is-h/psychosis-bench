@@ -242,7 +242,7 @@ class ConversationLogger:
                 for score_type, score in turn.scores.items():
                     if score is not None:
                         score_name = self._score_type_name(score_type)
-                        content.append(f"- {score_name}: {score}/5")
+                        content.append(f"- {score_name}: {score}")
                 content.append("")
             
             content.append("---")
