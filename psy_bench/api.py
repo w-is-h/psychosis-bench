@@ -2,13 +2,14 @@
 
 import asyncio
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import Dict, List, Optional, Union
 
 from .analysis import ExportFormat, ResultAnalyzer
 from .config import DEFAULT_JUDGE_MODEL, DEFAULT_TARGET_MODEL, OPENROUTER_API_KEY
 from .core.batch import BatchRunner
 from .core.cases import CaseLoader
 from .core.client import OpenRouterClient
+from .core.conversation_logger import ConversationLogger
 from .core.models import ExperimentResult, RunConfig, TestCase
 from .core.runner import ExperimentRunner
 from .core.scoring import Scorer
@@ -23,6 +24,8 @@ class PsyBench:
         default_model: Optional[str] = None,
         judge_model: Optional[str] = None,
         sis_use_llm: bool = True,
+        enable_conversation_logging: bool = True,
+        log_output_dir: Union[str, Path] = "conversation_logs",
         **config
     ):
         """Initialize PsyBench.
@@ -31,6 +34,9 @@ class PsyBench:
             api_key: OpenRouter API key (uses settings if not provided)
             default_model: Default model for experiments
             judge_model: Model to use for scoring
+            sis_use_llm: Whether to use LLM for SIS scoring
+            enable_conversation_logging: Enable automatic conversation logging
+            log_output_dir: Directory for conversation logs
             **config: Additional configuration options
         """
         # Configuration
@@ -38,6 +44,7 @@ class PsyBench:
         self.default_model = default_model or DEFAULT_TARGET_MODEL
         self.judge_model = judge_model or DEFAULT_JUDGE_MODEL
         self.sis_use_llm = sis_use_llm
+        self.enable_conversation_logging = enable_conversation_logging
         
         # Avoid printing secrets (API key) on initialization
         
@@ -53,6 +60,12 @@ class PsyBench:
         self._scorer = Scorer(self._client, self.judge_model, sis_use_llm=self.sis_use_llm)
         self._runner = ExperimentRunner(self._client, self._scorer)
         self._batch_runner = BatchRunner(self._runner)
+        
+        # Initialize conversation logger
+        if self.enable_conversation_logging:
+            self._conversation_logger = ConversationLogger(log_output_dir)
+        else:
+            self._conversation_logger = None
         
         # Load bundled test cases
         self._cases = CaseLoader.load_bundled_cases()
@@ -99,11 +112,20 @@ class PsyBench:
         )
         
         # Run experiment
-        return self._runner.run(
+        result = self._runner.run(
             test_case=test_case,
             model=model or self.default_model,
             config=config
         )
+        
+        # Log conversation if enabled
+        if self._conversation_logger:
+            log_files = self._conversation_logger.log_experiment(result)
+            if verbose:
+                for format_type, path in log_files.items():
+                    print(f"📝 Conversation log ({format_type}): {path}")
+        
+        return result
     
     def run_batch(
         self,
@@ -148,7 +170,17 @@ class PsyBench:
         
         # Run batch
         config = RunConfig(verbose=verbose, judge_model=self.judge_model)
-        return self._batch_runner.run_batch(test_cases, models, config)
+        results = self._batch_runner.run_batch(test_cases, models, config)
+        
+        # Log batch conversation if enabled
+        if self._conversation_logger and results:
+            batch_name = f"batch_{len(models)}models_{len(test_cases)}cases"
+            log_files = self._conversation_logger.log_batch_experiments(results, batch_name)
+            if verbose:
+                for format_type, path in log_files.items():
+                    print(f"📝 Batch conversation log ({format_type}): {path}")
+        
+        return results
     
     async def run_batch_async(
         self,
@@ -194,9 +226,19 @@ class PsyBench:
         
         # Run async batch
         config = RunConfig(verbose=verbose, judge_model=self.judge_model)
-        return await self._batch_runner.run_batch_async(
+        results = await self._batch_runner.run_batch_async(
             test_cases, models, config, max_concurrent
         )
+        
+        # Log batch conversation if enabled
+        if self._conversation_logger and results:
+            batch_name = f"async_batch_{len(models)}models_{len(test_cases)}cases"
+            log_files = self._conversation_logger.log_batch_experiments(results, batch_name)
+            if verbose:
+                for format_type, path in log_files.items():
+                    print(f"📝 Async batch conversation log ({format_type}): {path}")
+        
+        return results
     
     def analyze(
         self,
@@ -270,3 +312,35 @@ class PsyBench:
             List of loaded test cases
         """
         return CaseLoader.load_from_file(file_path)
+    
+    def log_conversations(
+        self,
+        results: Union[ExperimentResult, List[ExperimentResult]],
+        format_type: str = "both",
+        batch_name: Optional[str] = None
+    ) -> Dict[str, Path]:
+        """Manually log conversations for existing experiment results.
+        
+        Args:
+            results: Single result or list of results to log
+            format_type: Output format ("json", "markdown", or "both")
+            batch_name: Name for batch logging (auto-generated if not provided)
+            
+        Returns:
+            Dictionary with paths to created log files
+            
+        Example:
+            >>> results = bench.run_batch()
+            >>> log_files = bench.log_conversations(results, format_type="markdown")
+        """
+        if not self._conversation_logger:
+            raise ValueError("Conversation logging is disabled. Enable it in PsyBench initialization.")
+        
+        if isinstance(results, ExperimentResult):
+            # Single experiment
+            return self._conversation_logger.log_experiment(results, format_type)
+        else:
+            # Batch of experiments
+            if not batch_name:
+                batch_name = f"manual_batch_{len(results)}experiments"
+            return self._conversation_logger.log_batch_experiments(results, batch_name, format_type)
