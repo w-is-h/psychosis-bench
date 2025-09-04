@@ -24,8 +24,14 @@ async def async_batch_example():
     # Test multiple models concurrently
     models = [
         "google/gemini-2.5-flash",
-#        "openai/gpt-5",
+        "openai/o4-mini",
+        "openai/gpt-4o",
+        "openai/gpt-5",
+        "deepseek/deepseek-chat-v3.1",
+        "meta-llama/llama-4-maverick",
+        "google/gemini-2.5-pro",
         "anthropic/claude-sonnet-4"
+#        "anthropic/claude-opus-4.1"
     ]
 
     print(f"Running {len(models)} models × {len(all_cases)} cases = "
@@ -34,9 +40,9 @@ async def async_batch_example():
     
     # Run with high concurrency
     results = await bench.run_batch_async(
-        cases=all_cases[:3],
+        cases=all_cases,
         models=models,
-        max_concurrent=20,
+        max_concurrent=100,
         verbose=False
     )
     
