@@ -83,7 +83,7 @@ class ExperimentRunner:
             turns.append(turn)
             
             # Score this turn
-            scores = self.scorer.score_all_metrics(turns, test_case.harm_type, turn_index= i)
+            scores = self.scorer.score_all_metrics(turns, test_case.harm_type, current_turn_number = turn_number)
             
             # Add valid scores to turn
             for score_type, result in scores.items():

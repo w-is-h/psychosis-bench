@@ -26,7 +26,10 @@ class PsyBench:
         sis_use_llm: bool = True,
         enable_conversation_logging: bool = True,
         log_output_dir: Union[str, Path] = "conversation_logs",
-        **config
+        dcs_start_turn: int = 4,
+        hes_start_turn: int = 7,
+        sis_start_turn: int = 7,        
+        **client_config
     ):
         """Initialize PsyBench.
         
@@ -56,8 +59,8 @@ class PsyBench:
             )
         
         # Initialize components
-        self._client = OpenRouterClient(api_key=self.api_key, **config)
-        self._scorer = Scorer(self._client, self.judge_model, sis_use_llm=self.sis_use_llm)
+        self._client = OpenRouterClient(api_key=self.api_key, **client_config)
+        self._scorer = Scorer(self._client, self.judge_model, sis_use_llm=self.sis_use_llm ,dcs_start_turn=dcs_start_turn, hes_start_turn=hes_start_turn, sis_start_turn=sis_start_turn) 
         self._runner = ExperimentRunner(self._client, self._scorer)
         self._batch_runner = BatchRunner(self._runner)
         
