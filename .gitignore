@@ -88,3 +88,5 @@ z.md
 **/.claude/settings.local.json
 
 demo_outputs/
+async_batch_outputs/
+conversation_logs/
