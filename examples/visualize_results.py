@@ -220,13 +220,13 @@ def create_styled_table_html(df):
                 metric_kind = determine_metric_kind(col, row)
                 # In pivoted statistics table, color only 'mean' columns
                 if 'score_type' in df.columns and ('mean' not in str(col).lower()):
-                    html.append(f'<td>{value:.6f}</td>')
+                    html.append(f'<td>{value:.3f}</td>')
                     continue
 
                 if metric_kind == 'dcs' or metric_kind == 'hes':
                     normalized = float(value) / 2.0 if value is not None else 0.5
                     bg_color, text_color = to_rgb_css_from_normalized(normalized, invert=False)
-                    html.append(f'<td style="background-color: {bg_color}; color: {text_color};">{value:.6f}</td>')
+                    html.append(f'<td style="background-color: {bg_color}; color: {text_color};">{value:.3f}</td>')
                 elif metric_kind == 'sis':
                     # Prefer absolute normalization if total_turns available
                     denom = None
@@ -246,12 +246,95 @@ def create_styled_table_html(df):
                                 denom = 1.0
                     normalized = float(value) / denom if denom else 0.5
                     bg_color, text_color = to_rgb_css_from_normalized(normalized, invert=True)
-                    html.append(f'<td style="background-color: {bg_color}; color: {text_color};">{value:.6f}</td>')
+                    html.append(f'<td style="background-color: {bg_color}; color: {text_color};">{value:.3f}</td>')
                 else:
                     # Unrecognized metric; leave uncolored to avoid misleading cues
-                    html.append(f'<td>{value:.6f}</td>')
+                    html.append(f'<td>{value:.3f}</td>')
             else:
                 html.append(f'<td>{value}</td>')
+        html.append('</tr>')
+    html.append('</tbody>')
+    
+    html.append('</table>')
+    return '\n'.join(html)
+
+
+def create_case_performance_table_html(case_performance_data, unique_models):
+    """Create a case performance table with model names as merged headers and DCS/HES/SIS as sub-columns."""
+    
+    def determine_metric_kind(col_suffix: str) -> str:
+        if 'DCS' in col_suffix:
+            return 'dcs'
+        elif 'HES' in col_suffix:
+            return 'hes'
+        elif 'SIS' in col_suffix:
+            return 'sis'
+        return 'unknown'
+
+    def to_rgb_css_from_normalized(norm: float, invert: bool) -> tuple[str, str]:
+        # Clamp
+        norm = 0.0 if np.isnan(norm) else max(0.0, min(1.0, float(norm)))
+        # Hue: green (120°) to red (0°)
+        hue_deg = (120.0 * norm) if invert else (120.0 * (1.0 - norm))
+        h = hue_deg / 360.0
+        l = 0.5
+        s = 0.7
+        r, g, b = colorsys.hls_to_rgb(h, l, s)
+        R, G, B = int(r * 255), int(g * 255), int(b * 255)
+        bg = f'rgb({R}, {G}, {B})'
+        # Perceived brightness threshold for text color
+        text = 'white' if (R * 0.299 + G * 0.587 + B * 0.114) < 160 else 'black'
+        return bg, text
+    
+    html = ['<table>']
+    
+    # Create header rows
+    html.append('<thead>')
+    
+    # Top header row with model names (merged)
+    html.append('<tr>')
+    html.append('<th rowspan="2" class="case-name">Case</th>')  # Case column spans 2 rows
+    for model in unique_models:
+        html.append(f'<th colspan="3" class="model-header">{model}</th>')  # Each model spans 3 columns
+    html.append('</tr>')
+    
+    # Sub-header row with DCS/HES/SIS
+    html.append('<tr>')
+    for model in unique_models:
+        html.append('<th class="score-header">DCS</th>')
+        html.append('<th class="score-header">HES</th>')
+        html.append('<th class="score-header">SIS</th>')
+    html.append('</tr>')
+    
+    html.append('</thead>')
+    
+    # Add data rows
+    html.append('<tbody>')
+    for case_data in case_performance_data:
+        html.append('<tr>')
+        html.append(f'<td class="case-name">{case_data["Case"]}</td>')
+        
+        for model in unique_models:
+            dcs_value = case_data.get(f'{model}_DCS', 0)
+            hes_value = case_data.get(f'{model}_HES', 0)
+            sis_value = case_data.get(f'{model}_SIS', 0)
+            
+            # DCS cell (lower is better, so 0 should be green)
+            normalized = float(dcs_value) / 2.0
+            bg_color, text_color = to_rgb_css_from_normalized(normalized, invert=False)
+            html.append(f'<td style="background-color: {bg_color}; color: {text_color};">{dcs_value:.3f}</td>')
+            
+            # HES cell (lower is better, so 0 should be green)
+            normalized = float(hes_value) / 2.0
+            bg_color, text_color = to_rgb_css_from_normalized(normalized, invert=False)
+            html.append(f'<td style="background-color: {bg_color}; color: {text_color};">{hes_value:.3f}</td>')
+            
+            # SIS cell (higher is better for interventions, so 0 should be red)
+            # Assume max reasonable SIS is around 5 for normalization (adjust as needed)
+            normalized = min(float(sis_value) / 5.0, 1.0)
+            bg_color, text_color = to_rgb_css_from_normalized(normalized, invert=True)
+            html.append(f'<td style="background-color: {bg_color}; color: {text_color};">{sis_value:.3f}</td>')
+        
         html.append('</tr>')
     html.append('</tbody>')
     
@@ -505,8 +588,8 @@ def create_visualizations(analyzer, output_dir: Path) -> int:
         # Create DataFrame
         case_performance_df = pd.DataFrame(case_performance_data)
         
-        # Create styled table HTML
-        case_styled_table_html = create_styled_table_html(case_performance_df)
+        # Create styled table HTML using the new hierarchical header function
+        case_styled_table_html = create_case_performance_table_html(case_performance_data, unique_models)
         
         # Save case performance table to HTML file
         case_table_viz_path = output_dir / 'case_performance_table.html'
@@ -519,11 +602,27 @@ def create_visualizations(analyzer, output_dir: Path) -> int:
     <style>
         body {{ font-family: Arial, sans-serif; margin: 20px; }}
         h1 {{ color: #333; }}
-        table {{ border-collapse: collapse; width: 100%; font-size: 12px; }}
-        th, td {{ border: 1px solid #ddd; padding: 4px; text-align: center; }}
+        table {{ border-collapse: collapse; width: 100%; font-size: 14px; }}
+        th, td {{ border: 1px solid #ddd; padding: 6px; text-align: center; }}
         th {{ background-color: #f2f2f2; font-weight: bold; }}
-        .case-name {{ text-align: left; font-weight: bold; }}
-        .model-header {{ background-color: #e6f3ff; }}
+        .case-name {{ 
+            text-align: left; 
+            font-weight: bold; 
+            background-color: #f8f9fa;
+            min-width: 200px;
+        }}
+        .model-header {{ 
+            background-color: #4a90e2; 
+            color: white;
+            font-size: 16px;
+            font-weight: bold;
+        }}
+        .score-header {{
+            background-color: #7bb3f0;
+            color: white;
+            font-size: 12px;
+            font-weight: bold;
+        }}
     </style>
 </head>
 <body>
