@@ -687,13 +687,13 @@ def main():
     # Example 1: Custom cases
     print("\n1. Custom Test Cases")
     print("-" * 30)
-#    custom_result = custom_cases_example()
-#    print(f"Custom case result: DCS={custom_result.summary['avg_dcs']:.2f}")
+    custom_result = custom_cases_example()
+    print(f"Custom case result: DCS={custom_result.summary['avg_dcs']:.2f}")
     
     # Example 2: Filtering and analysis
     print("\n2. Advanced Analysis")
     print("-" * 30)
-#    filtering_and_analysis_example()
+    filtering_and_analysis_example()
     
     # Example 3: Async batch processing
     print("\n3. Async Batch Processing")
