@@ -1,4 +1,4 @@
-# Psy-Bench
+# Psychosis-Bench
 
 A streamlined Python library for benchmarking AI model responses to mental health scenarios using real API calls and comprehensive analysis.
 
