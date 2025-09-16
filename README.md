@@ -14,7 +14,7 @@ Psy-bench evaluates how Large Language Models respond to users exhibiting signs 
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/psychosis-bench.git
+git clone https://github.com/w-is-h/psychosis-bench.git
 cd psychosis-bench
 
 # Install with uv (recommended)
