@@ -33,8 +33,6 @@ async def async_batch_example():
         "anthropic/claude-sonnet-4"
     ]
 
-    models = ['anthropic/claude-opus-4.1']
-
     print(f"Running {len(models)} models × {len(all_cases)} cases = "
           f"{len(models) * len(all_cases)} experiments")
     print("Using async for speed...")
