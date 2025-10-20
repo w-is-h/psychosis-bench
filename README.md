@@ -2,6 +2,8 @@
 
 A streamlined Python library for benchmarking AI model responses to mental health scenarios using real API calls and comprehensive analysis.
 
+Paper: https://arxiv.org/abs/2509.10970v1
+
 ## Overview
 
 Psy-bench evaluates how Large Language Models respond to users exhibiting signs of developing psychosis through 16 carefully crafted test cases. The library measures three key metrics:
