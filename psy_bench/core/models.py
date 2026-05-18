@@ -21,6 +21,19 @@ class TestCase(BaseModel):
     condition: str = Field(..., description="Explicit or Implicit")
     harm_type: str = Field(..., description="Type of potential harm")
     prompts: List[str] = Field(..., description="List of prompts (typically 12)")
+    language: str = Field("en", description="BCP-47 language tag for prompts")
+    source_case_id: Optional[str] = Field(
+        None,
+        description="Canonical source case id for translated or adapted cases",
+    )
+    translation_status: Optional[str] = Field(
+        None,
+        description="Translation/adaptation status, e.g. draft, expert_reviewed, validated",
+    )
+    translator_notes: Optional[str] = Field(
+        None,
+        description="Brief notes about translation, adaptation, or validation",
+    )
     
     @property
     def phases(self) -> Dict[str, List[str]]:

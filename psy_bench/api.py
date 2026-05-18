@@ -1,10 +1,9 @@
 """Main API entry point for psy-bench."""
 
-import asyncio
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 
-from .analysis import ExportFormat, ResultAnalyzer
+from .analysis import ResultAnalyzer
 from .config import DEFAULT_JUDGE_MODEL, DEFAULT_TARGET_MODEL, OPENROUTER_API_KEY
 from .core.batch import BatchRunner
 from .core.cases import CaseLoader
@@ -28,7 +27,8 @@ class PsyBench:
         log_output_dir: Union[str, Path] = "conversation_logs",
         dcs_start_turn: int = 4,
         hes_start_turn: int = 7,
-        sis_start_turn: int = 7,        
+        sis_start_turn: int = 7,
+        case_languages: Optional[List[str]] = None,
         **client_config
     ):
         """Initialize PsyBench.
@@ -70,8 +70,12 @@ class PsyBench:
         else:
             self._conversation_logger = None
         
-        # Load bundled test cases
-        self._cases = CaseLoader.load_bundled_cases()
+        # Load bundled test cases. English remains the default for backward
+        # compatibility; pass case_languages=["en", "pl"] for multilingual runs.
+        if case_languages:
+            self._cases = CaseLoader.load_bundled_multilingual_cases(case_languages)
+        else:
+            self._cases = CaseLoader.load_bundled_cases()
     
     def run(
         self,
@@ -184,6 +188,38 @@ class PsyBench:
                     print(f"📝 Batch conversation log ({format_type}): {path}")
         
         return results
+
+    def run_language_comparison(
+        self,
+        baseline_language: str = "en",
+        comparison_language: str = "pl",
+        models: Optional[List[str]] = None,
+        max_cases: Optional[int] = None,
+        verbose: bool = True
+    ) -> List[ExperimentResult]:
+        """Run a matched language comparison benchmark.
+
+        Cases are matched by source_case_id. For the Polish-English extension,
+        initialize PsyBench with case_languages=["en", "pl"] and call this
+        method to run every matched English/Polish case for the same models.
+        """
+        languages = [baseline_language.lower(), comparison_language.lower()]
+        paired = CaseLoader.get_paired_cases(self._cases, languages=languages)
+        matched_cases: List[TestCase] = []
+
+        for source_id in sorted(paired):
+            by_language = paired[source_id]
+            matched_cases.extend([by_language[languages[0]], by_language[languages[1]]])
+            if max_cases is not None and len(matched_cases) >= max_cases * 2:
+                break
+
+        if not matched_cases:
+            raise ValueError(
+                "No matched language cases found. Load multilingual cases first, "
+                'for example PsyBench(api_key=..., case_languages=["en", "pl"]).'
+            )
+
+        return self.run_batch(cases=matched_cases, models=models, verbose=verbose)
     
     async def run_batch_async(
         self,
@@ -242,6 +278,39 @@ class PsyBench:
                     print(f"📝 Async batch conversation log ({format_type}): {path}")
         
         return results
+
+    async def run_language_comparison_async(
+        self,
+        baseline_language: str = "en",
+        comparison_language: str = "pl",
+        models: Optional[List[str]] = None,
+        max_cases: Optional[int] = None,
+        max_concurrent: int = 10,
+        verbose: bool = True
+    ) -> List[ExperimentResult]:
+        """Run a matched language comparison benchmark concurrently."""
+        languages = [baseline_language.lower(), comparison_language.lower()]
+        paired = CaseLoader.get_paired_cases(self._cases, languages=languages)
+        matched_cases: List[TestCase] = []
+
+        for source_id in sorted(paired):
+            by_language = paired[source_id]
+            matched_cases.extend([by_language[languages[0]], by_language[languages[1]]])
+            if max_cases is not None and len(matched_cases) >= max_cases * 2:
+                break
+
+        if not matched_cases:
+            raise ValueError(
+                "No matched language cases found. Load multilingual cases first, "
+                'for example PsyBench(api_key=..., case_languages=["en", "pl"]).'
+            )
+
+        return await self.run_batch_async(
+            cases=matched_cases,
+            models=models,
+            max_concurrent=max_concurrent,
+            verbose=verbose,
+        )
     
     def analyze(
         self,
@@ -284,6 +353,22 @@ class PsyBench:
             cases = self._cases
         
         return [case.name for case in cases]
+
+    def list_cases_by_language(self, language: str) -> List[str]:
+        """List loaded test cases for a language."""
+        cases = CaseLoader.get_cases_by_language(language, self._cases)
+        return [case.name for case in cases]
+
+    def get_languages(self) -> List[str]:
+        """Get loaded language tags."""
+        return sorted(set(case.language for case in self._cases))
+
+    def get_paired_cases(
+        self,
+        languages: Optional[List[str]] = None,
+    ) -> Dict[str, Dict[str, TestCase]]:
+        """Return loaded cases grouped by source case id and language."""
+        return CaseLoader.get_paired_cases(self._cases, languages=languages)
     
     def get_themes(self) -> List[str]:
         """Get list of available themes.

@@ -4,11 +4,11 @@ import json
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Union
 
 import pandas as pd
 
-from .core.models import ExperimentResult, ScoreType
+from .core.models import ExperimentResult
 
 
 class ExportFormat(str, Enum):
@@ -66,7 +66,8 @@ class ResultAnalyzer:
             "overview": overall_stats,
             "by_model": self._analyze_by_model(),
             "by_case": self._analyze_by_case(),
-            "by_theme": self._analyze_by_theme()
+            "by_theme": self._analyze_by_theme(),
+            "by_language": self._analyze_by_language(),
         }
     
     def _analyze_by_model(self) -> Dict[str, Dict[str, Any]]:
@@ -140,6 +141,77 @@ class ResultAnalyzer:
             }
         
         return theme_stats
+
+    def _analyze_by_language(self) -> Dict[str, Dict[str, Any]]:
+        """Group and analyze results by language."""
+        language_groups = {}
+
+        for result in self.results:
+            language = result.test_case.language
+            if language not in language_groups:
+                language_groups[language] = []
+            language_groups[language].append(result.summary)
+
+        language_stats = {}
+        for language, summaries in language_groups.items():
+            language_stats[language] = {
+                "experiments": len(summaries),
+                "avg_dcs": sum(s["avg_dcs"] for s in summaries) / len(summaries),
+                "avg_hes": sum(s["avg_hes"] for s in summaries) / len(summaries),
+                "total_sis": sum(s["total_sis"] for s in summaries),
+                "avg_sis": sum(s["total_sis"] for s in summaries) / len(summaries),
+            }
+
+        return language_stats
+
+    def compare_languages(
+        self,
+        baseline_language: str = "en",
+        comparison_language: str = "pl",
+    ) -> pd.DataFrame:
+        """Compare matched model/case results across two languages.
+
+        Returns one row per matched model × source_case_id pair with comparison
+        minus baseline deltas for DCS, HES, and SIS.
+        """
+        rows = []
+        grouped: Dict[tuple[str, str], Dict[str, ExperimentResult]] = {}
+
+        for result in self.results:
+            source_case_id = result.test_case.source_case_id or result.test_case.id
+            key = (result.model, source_case_id)
+            grouped.setdefault(key, {})[result.test_case.language.lower()] = result
+
+        baseline = baseline_language.lower()
+        comparison = comparison_language.lower()
+        for (model, source_case_id), by_language in grouped.items():
+            if baseline not in by_language or comparison not in by_language:
+                continue
+
+            base = by_language[baseline]
+            comp = by_language[comparison]
+            base_summary = base.summary
+            comp_summary = comp.summary
+            rows.append({
+                "model": model,
+                "source_case_id": source_case_id,
+                "case": base.test_case.name,
+                "theme": base.test_case.theme,
+                "condition": base.test_case.condition,
+                "baseline_language": baseline,
+                "comparison_language": comparison,
+                "baseline_avg_dcs": base_summary["avg_dcs"],
+                "comparison_avg_dcs": comp_summary["avg_dcs"],
+                "delta_avg_dcs": comp_summary["avg_dcs"] - base_summary["avg_dcs"],
+                "baseline_avg_hes": base_summary["avg_hes"],
+                "comparison_avg_hes": comp_summary["avg_hes"],
+                "delta_avg_hes": comp_summary["avg_hes"] - base_summary["avg_hes"],
+                "baseline_total_sis": base_summary["total_sis"],
+                "comparison_total_sis": comp_summary["total_sis"],
+                "delta_total_sis": comp_summary["total_sis"] - base_summary["total_sis"],
+            })
+
+        return pd.DataFrame(rows)
     
     def print_summary(self, detailed: bool = True):
         """Print formatted summary to console.
@@ -155,7 +227,7 @@ class ResultAnalyzer:
         
         # Overview
         overview = summary["overview"]
-        print(f"\n📊 OVERVIEW:")
+        print("\n📊 OVERVIEW:")
         print(f"  Total Experiments: {overview['total_experiments']}")
         print(f"  Unique Models: {overview['unique_models']}")
         print(f"  Unique Cases: {overview['unique_cases']}")
@@ -165,7 +237,7 @@ class ResultAnalyzer:
         
         if detailed:
             # Model breakdown
-            print(f"\n🤖 BY MODEL:")
+            print("\n🤖 BY MODEL:")
             for model, stats in summary["by_model"].items():
                 print(f"\n  {model}:")
                 print(f"    Experiments: {stats['experiments']}")
@@ -174,13 +246,23 @@ class ResultAnalyzer:
                 print(f"    Total SIS: {stats['total_sis']}")
             
             # Theme breakdown
-            print(f"\n🎭 BY THEME:")
+            print("\n🎭 BY THEME:")
             for theme, stats in summary["by_theme"].items():
                 print(f"\n  {theme}:")
                 print(f"    Experiments: {stats['experiments']}")
                 print(f"    Avg DCS: {stats['avg_dcs']:.3f}")
                 print(f"    Avg HES: {stats['avg_hes']:.3f}")
                 print(f"    Total SIS: {stats['total_sis']}")
+
+            # Language breakdown
+            if len(summary["by_language"]) > 1:
+                print("\n🌐 BY LANGUAGE:")
+                for language, stats in summary["by_language"].items():
+                    print(f"\n  {language}:")
+                    print(f"    Experiments: {stats['experiments']}")
+                    print(f"    Avg DCS: {stats['avg_dcs']:.3f}")
+                    print(f"    Avg HES: {stats['avg_hes']:.3f}")
+                    print(f"    Avg SIS: {stats['avg_sis']:.3f}")
     
     def to_dataframe(self) -> pd.DataFrame:
         """Convert results to pandas DataFrame.
@@ -195,6 +277,10 @@ class ResultAnalyzer:
             row = {
                 "model": result.model,
                 "case": result.test_case.name,
+                "case_id": result.test_case.id,
+                "source_case_id": result.test_case.source_case_id or result.test_case.id,
+                "language": result.test_case.language,
+                "translation_status": result.test_case.translation_status,
                 "theme": result.test_case.theme,
                 "condition": result.test_case.condition,
                 "harm_type": result.test_case.harm_type,
@@ -295,3 +381,13 @@ class ResultAnalyzer:
                 case_stats = self.get_summary()["by_case"]
                 case_df = pd.DataFrame.from_dict(case_stats, orient='index')
                 case_df.to_excel(writer, sheet_name='By Case')
+
+            # Language analysis
+            language_stats = self.get_summary()["by_language"]
+            language_df = pd.DataFrame.from_dict(language_stats, orient='index')
+            language_df.to_excel(writer, sheet_name='By Language')
+
+            # Matched language comparison when both English and Polish exist
+            comparison_df = self.compare_languages("en", "pl")
+            if not comparison_df.empty:
+                comparison_df.to_excel(writer, sheet_name='Language Deltas', index=False)

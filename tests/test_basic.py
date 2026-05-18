@@ -2,7 +2,7 @@
 """Basic tests for psy-bench."""
 
 import pytest
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 from psy_bench import PsyBench, TestCase, ExperimentResult
 from psy_bench.core.client import ChatMessage, ChatResponse
@@ -34,6 +34,13 @@ class TestPsyBench:
         assert len(cases) >= 1  # Should have at least 1 case
         assert all(isinstance(case, str) for case in cases)
         assert "Case 1.1: The Conduit [EXPLICIT]" in cases
+
+    def test_default_language_metadata(self):
+        """Test that bundled English cases expose language metadata."""
+        bench = PsyBench(api_key="test-key")
+
+        assert bench.get_languages() == ["en"]
+        assert len(bench.list_cases_by_language("en")) == len(bench.list_cases())
     
     def test_get_themes(self):
         """Test getting available themes."""
@@ -129,6 +136,58 @@ class TestPsyBench:
         assert analyzer is not None
         summary = analyzer.get_summary()
         assert summary['overview']['total_experiments'] == 1
+        assert summary['by_language']['en']['experiments'] == 1
+
+    def test_language_comparison_analysis(self):
+        """Test matched language delta analysis."""
+        bench = PsyBench(api_key="test-key")
+
+        english_case = TestCase(
+            id="case_1",
+            name="Case 1",
+            theme="Test Theme",
+            condition="Explicit",
+            harm_type="Test Harm",
+            prompts=["test"] * 12,
+            language="en",
+        )
+        polish_case = TestCase(
+            id="case_1_pl",
+            source_case_id="case_1",
+            name="Case 1 PL",
+            theme="Test Theme",
+            condition="Explicit",
+            harm_type="Test Harm",
+            prompts=["test"] * 12,
+            language="pl",
+            translation_status="validated",
+        )
+        results = [
+            ExperimentResult(
+                test_case=english_case,
+                model="test-model",
+                turns=[
+                    Turn(number=7, user_message="x", bot_response="y", scores={ScoreType.DCS: 0, ScoreType.HES: 0, ScoreType.SIS: 1})
+                ],
+            ),
+            ExperimentResult(
+                test_case=polish_case,
+                model="test-model",
+                turns=[
+                    Turn(number=7, user_message="x", bot_response="y", scores={ScoreType.DCS: 2, ScoreType.HES: 1, ScoreType.SIS: 0})
+                ],
+            ),
+        ]
+
+        analyzer = bench.analyze(results, print_summary=False)
+        deltas = analyzer.compare_languages("en", "pl")
+
+        assert len(deltas) == 1
+        row = deltas.iloc[0]
+        assert row["source_case_id"] == "case_1"
+        assert row["delta_avg_dcs"] == 2
+        assert row["delta_avg_hes"] == 1
+        assert row["delta_total_sis"] == -1
 
 
 class TestClient:
@@ -231,6 +290,36 @@ class TestCaseLoader:
         assert len(implicit) >= 1
         assert all(case.condition == "Explicit" for case in explicit)
         assert all(case.condition == "Implicit" for case in implicit)
+
+    def test_get_paired_cases(self):
+        """Test grouping cases by source id and language."""
+        from psy_bench.core.cases import CaseLoader
+
+        english_case = TestCase(
+            id="case_1",
+            name="Case 1",
+            theme="Test Theme",
+            condition="Explicit",
+            harm_type="Test Harm",
+            prompts=["test"] * 12,
+            language="en",
+        )
+        polish_case = TestCase(
+            id="case_1_pl",
+            source_case_id="case_1",
+            name="Case 1 PL",
+            theme="Test Theme",
+            condition="Explicit",
+            harm_type="Test Harm",
+            prompts=["test"] * 12,
+            language="pl",
+        )
+
+        paired = CaseLoader.get_paired_cases([english_case, polish_case], languages=["en", "pl"])
+
+        assert list(paired) == ["case_1"]
+        assert paired["case_1"]["en"] == english_case
+        assert paired["case_1"]["pl"] == polish_case
 
 
 if __name__ == "__main__":

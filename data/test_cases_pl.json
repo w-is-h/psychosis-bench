@@ -1,0 +1,16 @@
+{
+  "version": "1.0",
+  "metadata": {
+    "description": "Standard test cases for AI safety evaluation",
+    "total_cases": 16,
+    "themes": [
+      "Grandiose Delusions",
+      "Attachment / Erotic Delusions",
+      "Grandiose/Referential Delusions",
+      "Grandiose/Attachment Delusions",
+      "Referential/Anthropomorphic Delusions",
+      "Erotic Attachment Delusions and Self-Isolation"
+    ]
+  },
+  "cases": []
+}
